@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { config } from "./config.js";
-import { classifyNews } from "./rules.js";
+import { classifyNews } from "./classifier.js";
 import {
   formatShanghaiDateTime,
   getShanghaiDateKey,
@@ -31,10 +31,6 @@ function isQuietHours(date, appConfig = config) {
   return hour >= appConfig.quietHoursStart || hour < appConfig.quietHoursEnd;
 }
 
-function isAfterOfficialDigestFallbackHour(date, appConfig = config) {
-  return getShanghaiHour(date) >= appConfig.officialDigestFallbackHour;
-}
-
 function createEvent(item, classification) {
   const occurredAtMs = parseTimeMs(item.publishedAt, Date.now());
   return {
@@ -59,9 +55,6 @@ function createEvent(item, classification) {
 
 function renderRealtimeAlert(event) {
   const lines = [
-    "类型：重大结果",
-    `事件线：${event.topicLabel}`,
-    `状态：${event.statusLabel}`,
     `标题：${event.title}`,
     `摘要：${event.summary}`,
     `来源：${event.source}`,
@@ -74,7 +67,7 @@ function renderRealtimeAlert(event) {
 
 function createRealtimeMessage(event) {
   return {
-    subject: `${event.topicLabel}：${event.statusLabel}`,
+    subject: event.title,
     text: renderRealtimeAlert(event)
   };
 }
@@ -114,15 +107,8 @@ function createOfficialMiddleEastDigestMessage(digest) {
 }
 
 function buildQuietWindowLabel(now, appConfig = config) {
-  const endDateKey = getShanghaiDateKey(now);
-  const startDate =
-    appConfig.quietHoursStart > appConfig.quietHoursEnd
-      ? new Date(now.getTime() - 24 * 60 * 60 * 1000)
-      : now;
-  const startDateKey = getShanghaiDateKey(startDate);
-  return `${startDateKey} ${padHour(appConfig.quietHoursStart)}:00 - ${endDateKey} ${padHour(
-    appConfig.quietHoursEnd
-  )}:00`;
+  const dateKey = getShanghaiDateKey(now);
+  return `${dateKey} ${padHour(appConfig.quietHoursStart)}:00 - ${padHour(appConfig.quietHoursEnd)}:00`;
 }
 
 function groupDigestEvents(events) {
@@ -182,8 +168,7 @@ function createDigestMessage(events, appConfig = config, now = new Date()) {
   const remaining = grouped.length - displayedGroups.length;
   const windowLabel = buildQuietWindowLabel(now, appConfig);
   const body = [
-    "夜间重大结果汇总",
-    `时间窗口：${windowLabel} (Asia/Shanghai)`,
+    `时间段：${windowLabel} (Asia/Shanghai)`,
     "",
     ...displayedGroups.flatMap((group, index) => {
       const cardLines = renderDigestCard(group).split("\n");
@@ -195,13 +180,8 @@ function createDigestMessage(events, appConfig = config, now = new Date()) {
     .join("\n")
     .trim();
 
-  const subject =
-    displayedGroups.length === 1
-      ? `【夜间结果】${displayedGroups[0].topicLabel}：${displayedGroups[0].latest.statusLabel}`
-      : `【夜间结果】${grouped.length}条重大更新`;
-
   return {
-    subject,
+    subject: "重点精华版",
     text: body,
     eventCount: grouped.length
   };
@@ -225,53 +205,47 @@ async function rememberOfficialMiddleEastDigest(items, store) {
 
 async function maybeSendMorningDigest(store, sendFn, appConfig = config, now = new Date()) {
   if (isQuietHours(now, appConfig)) {
-    return { sent: false, eventCount: 0, mode: null };
+    return { sent: false, majorSent: false, officialSent: false };
   }
 
   const meta = await store.getMeta();
   const todayKey = getShanghaiDateKey(now);
-  if (meta.lastMorningDigestDate === todayKey) {
-    return { sent: false, eventCount: 0, mode: null };
-  }
+  let majorSent = false;
+  let officialSent = false;
 
-  const officialDigest = await store.getOfficialMiddleEastDigest();
-  if (
-    officialDigest &&
-    getShanghaiDateKey(new Date(officialDigest.occurredAtMs ?? parseTimeMs(officialDigest.publishedAt, 0))) ===
-      todayKey
-  ) {
-    const message = createOfficialMiddleEastDigestMessage(officialDigest);
-    await sendFn(message);
+  // 1. 发重大事件摘要（如果今天还没处理过且队列非空）
+  if (meta.lastMajorDigestDate !== todayKey) {
+    const queue = await store.getDigestQueue();
     await store.clearDigestQueue();
-    await store.setLastMorningDigestDate(todayKey);
-    console.log(`[sent] ${messageLogLine(message)}`);
-    return { sent: true, eventCount: 1, mode: "official" };
+    await store.setLastMajorDigestDate(todayKey);
+
+    if (queue.length > 0) {
+      const digest = createDigestMessage(queue, appConfig, now);
+      if (digest) {
+        await sendFn({ subject: digest.subject, text: digest.text });
+        console.log(`[sent] ${messageLogLine(digest)}`);
+        majorSent = true;
+      }
+    }
   }
 
-  const queue = await store.getDigestQueue();
-  if (!queue.length) {
-    return { sent: false, eventCount: 0, mode: null };
+  // 2. 发金十官方中东局势跟踪（今天有且还没发过就发）
+  if (meta.lastOfficialDigestDate !== todayKey) {
+    const officialDigest = await store.getOfficialMiddleEastDigest();
+    if (
+      officialDigest &&
+      getShanghaiDateKey(new Date(officialDigest.occurredAtMs ?? parseTimeMs(officialDigest.publishedAt, 0))) ===
+        todayKey
+    ) {
+      const message = createOfficialMiddleEastDigestMessage(officialDigest);
+      await sendFn(message);
+      await store.setLastOfficialDigestDate(todayKey);
+      console.log(`[sent] ${messageLogLine(message)}`);
+      officialSent = true;
+    }
   }
 
-  if (!isAfterOfficialDigestFallbackHour(now, appConfig)) {
-    return { sent: false, eventCount: 0, mode: null };
-  }
-
-  const digest = createDigestMessage(queue, appConfig, now);
-  if (!digest) {
-    await store.clearDigestQueue();
-    return { sent: false, eventCount: 0, mode: null };
-  }
-
-  await sendFn({
-    subject: digest.subject,
-    text: digest.text
-  });
-  await store.clearDigestQueue();
-  await store.setLastMorningDigestDate(todayKey);
-  console.log(`[sent] ${messageLogLine(digest)}`);
-
-  return { sent: true, eventCount: digest.eventCount, mode: "fallback" };
+  return { sent: majorSent || officialSent, majorSent, officialSent };
 }
 
 export async function processIncomingItems(items, store, sendFn, appConfig = config) {
@@ -295,15 +269,18 @@ export async function processIncomingItems(items, store, sendFn, appConfig = con
   await rememberOfficialMiddleEastDigest(sorted, store);
 
   for (const item of sorted) {
-    const classification = classifyNews(item);
-    if (!classification) continue;
-    stats.matched++;
-
     const sentBefore = await store.hasSent(item.externalId);
     if (sentBefore) {
       stats.alreadySent++;
       continue;
     }
+
+    const classification = await classifyNews(item);
+    if (!classification) {
+      await store.rememberSent(item.externalId);
+      continue;
+    }
+    stats.matched++;
 
     const event = createEvent(item, classification);
     const latestTopicEvent = await store.latestEventForTopic(
@@ -318,7 +295,7 @@ export async function processIncomingItems(items, store, sendFn, appConfig = con
       continue;
     }
 
-    const quietDelivery = isQuietHours(new Date(event.occurredAtMs), appConfig) && !classification.breakQuietHours;
+    const quietDelivery = isQuietHours(new Date(event.occurredAtMs), appConfig);
 
     try {
       if (quietDelivery) {
@@ -340,10 +317,8 @@ export async function processIncomingItems(items, store, sendFn, appConfig = con
 
   try {
     const digestStats = await maybeSendMorningDigest(store, sendFn, appConfig, new Date());
-    if (digestStats.sent) {
-      stats.sentDigest = 1;
-      stats.digestEvents = digestStats.eventCount;
-    }
+    if (digestStats.majorSent) stats.sentDigest = 1;
+    if (digestStats.officialSent) stats.sentDigest = (stats.sentDigest || 0) + 1;
   } catch (error) {
     stats.failedSends++;
     console.error("[digest-send-error]", error.message);

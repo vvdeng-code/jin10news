@@ -6,7 +6,7 @@ const JIN10_HEADERS = {
   "x-version": "1.0.0"
 };
 
-const MIDDLE_EAST_DIGEST_TITLE_RE = /^金十数据整理[:：]\s*中东局势跟踪(?:[（(][^）)]+[）)])?$/u;
+const MIDDLE_EAST_DIGEST_TITLE_RE = /^【?金十数据整理[:：]\s*中东局势跟踪/u;
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));

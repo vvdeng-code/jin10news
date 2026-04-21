@@ -1,7 +1,7 @@
 import path from "node:path";
 import dotenv from "dotenv";
 
-dotenv.config();
+dotenv.config({ override: true });
 
 function intFromEnv(name, fallback) {
   const raw = process.env[name];
@@ -26,7 +26,8 @@ const required = [
   "GOOGLE_CLIENT_ID",
   "GOOGLE_CLIENT_SECRET",
   "GOOGLE_REFRESH_TOKEN",
-  "EMAIL_TO"
+  "EMAIL_TO",
+  "ANTHROPIC_API_KEY"
 ];
 const missing = required.filter((key) => !process.env[key]);
 
@@ -43,11 +44,11 @@ export const config = {
   jin10RequestRetries: intFromEnv("JIN10_REQUEST_RETRIES", 2),
   emailSendTimeoutMs: intFromEnv("EMAIL_SEND_TIMEOUT_MS", 30000),
   emailSendRetries: intFromEnv("EMAIL_SEND_RETRIES", 2),
-  quietHoursStart: intFromEnv("QUIET_HOURS_START", 23),
+  quietHoursStart: intFromEnv("QUIET_HOURS_START", 0),
   quietHoursEnd: intFromEnv("QUIET_HOURS_END", 9),
-  officialDigestFallbackHour: intFromEnv("OFFICIAL_DIGEST_FALLBACK_HOUR", 10),
   morningDigestMaxTopics: intFromEnv("MORNING_DIGEST_MAX_TOPICS", 3),
   topicStateWindowHours: intFromEnv("TOPIC_STATE_WINDOW_HOURS", 168),
+  anthropicApiKey: process.env.ANTHROPIC_API_KEY ?? "",
   storePath: path.resolve(process.env.STORE_PATH ?? "./data/store.json"),
   jin10SiteUrl,
   sources: [

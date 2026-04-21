@@ -6,7 +6,8 @@ const EMPTY = {
   sent: [],
   digestQueue: [],
   meta: {
-    lastMorningDigestDate: null,
+    lastMajorDigestDate: null,
+    lastOfficialDigestDate: null,
     officialMiddleEastDigest: null
   }
 };
@@ -35,9 +36,13 @@ export class FileStore {
       meta:
         parsed.meta && typeof parsed.meta === "object"
           ? {
-              lastMorningDigestDate:
-                typeof parsed.meta.lastMorningDigestDate === "string"
-                  ? parsed.meta.lastMorningDigestDate
+              lastMajorDigestDate:
+                typeof parsed.meta.lastMajorDigestDate === "string"
+                  ? parsed.meta.lastMajorDigestDate
+                  : null,
+              lastOfficialDigestDate:
+                typeof parsed.meta.lastOfficialDigestDate === "string"
+                  ? parsed.meta.lastOfficialDigestDate
                   : null,
               officialMiddleEastDigest:
                 parsed.meta.officialMiddleEastDigest &&
@@ -106,9 +111,15 @@ export class FileStore {
     return data.meta;
   }
 
-  async setLastMorningDigestDate(dateKey) {
+  async setLastMajorDigestDate(dateKey) {
     const data = await this.read();
-    data.meta.lastMorningDigestDate = dateKey;
+    data.meta.lastMajorDigestDate = dateKey;
+    await this.write(data);
+  }
+
+  async setLastOfficialDigestDate(dateKey) {
+    const data = await this.read();
+    data.meta.lastOfficialDigestDate = dateKey;
     await this.write(data);
   }
 
