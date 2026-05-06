@@ -275,6 +275,10 @@ export async function processIncomingItems(items, store, sendFn, appConfig = con
       continue;
     }
 
+    if (!appConfig.realtimePushEnabled) {
+      continue;
+    }
+
     const classification = await classifyNews(item);
     if (!classification) {
       await store.rememberSent(item.externalId);

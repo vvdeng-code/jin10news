@@ -46,6 +46,7 @@ export const config = {
   emailSendRetries: intFromEnv("EMAIL_SEND_RETRIES", 2),
   quietHoursStart: intFromEnv("QUIET_HOURS_START", 0),
   quietHoursEnd: intFromEnv("QUIET_HOURS_END", 9),
+  realtimePushEnabled: process.env.REALTIME_PUSH !== "false",
   morningDigestMaxTopics: intFromEnv("MORNING_DIGEST_MAX_TOPICS", 3),
   topicStateWindowHours: intFromEnv("TOPIC_STATE_WINDOW_HOURS", 168),
   anthropicApiKey: process.env.ANTHROPIC_API_KEY ?? "",
